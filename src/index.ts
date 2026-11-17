@@ -256,9 +256,17 @@ async function handleTurn(env: Env, request: Request, sessionId: string, userId:
         if (check.ok) {
           payload = parsed;
         } else {
-          // 第一次不合格：静默重试一次（非流式），成功后用 replace 覆盖已显示内容
+          // 第一次不合格：补一句纠错要求后重试一次（非流式），成功后用 replace 覆盖已显示内容
           await send('status', { phase: 'retry', reason: check.reason });
-          const retry = await chatOnce(env, messages);
+          const retryMessages = [
+            ...messages,
+            { role: 'assistant' as const, content: (rawText || '').slice(0, 1500) || '（未输出）' },
+            {
+              role: 'user' as const,
+              content: `你上一次的输出不合格：${check.reason}。请严格只输出一个 JSON 对象，必须包含 scene、narration、choices、state_delta、ending 五个字段（没有结局时 ending 必须是 null），不要任何解释文字。`,
+            },
+          ];
+          const retry = await chatOnce(env, retryMessages);
           const parsed2 = extractJson(retry);
           const check2 = validateModelTurn(parsed2);
           if (check2.ok) {
