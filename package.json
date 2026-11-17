@@ -1,0 +1,20 @@
+{
+  "name": "ai-text-adventure",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AI 文字冒险游戏 — 玩家自由输入，AI 生成剧情，数值由后端裁定",
+  "scripts": {
+    "build": "node scripts/build-web.mjs",
+    "dev": "node scripts/build-web.mjs && wrangler dev",
+    "deploy": "node scripts/build-web.mjs && wrangler deploy",
+    "db:init:local": "wrangler d1 migrations apply DB --local",
+    "db:init:remote": "wrangler d1 migrations apply DB --remote"
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}
