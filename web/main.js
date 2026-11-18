@@ -1,4 +1,8 @@
-import { createApp, reactive, ref, computed, nextTick } from 'vue';
+import { createApp, reactive, ref, computed, nextTick, watch } from 'vue';
+import { createAmbience, sceneOf } from './effects.js';
+
+/* 全屏氛围粒子：在 <body> 层常驻，不参与 Vue 重渲染 */
+const ambience = createAmbience(document.getElementById('ambience'));
 
 /* ------------------------------------------------------------------ */
 /* 工具                                                                */
@@ -92,6 +96,58 @@ const App = {
       toast.value = { msg, bad };
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => (toast.value = null), 3200);
+    }
+
+    /* ---------------- 视觉：剧本皮肤 ---------------- */
+
+    const curTemplate = computed(
+      () => templates.value.find((t) => t.id === session.value?.templateId) || null
+    );
+    const curScene = computed(() => sceneOf(session.value?.templateId));
+    const curArt = computed(() => 'url(' + curScene.value.art + ')');
+    const thumbUrl = (id) => 'url(' + sceneOf(id).thumb + ')';
+
+    const hit = ref(false);
+    let hitTimer = null;
+    function shake() {
+      hit.value = false;
+      clearTimeout(hitTimer);
+      requestAnimationFrame(() => (hit.value = true));
+      hitTimer = setTimeout(() => (hit.value = false), 620);
+    }
+
+    watch(
+      [view, curScene, curTemplate, ending],
+      () => {
+        const inGame = view.value === 'game';
+        ambience.setTheme(inGame ? curScene.value.theme : 'home');
+        const accent = inGame ? curTemplate.value?.accent || '#e0a458' : '#e0a458';
+        const root = document.documentElement;
+        root.style.setProperty('--accent', accent);
+        root.style.setProperty('--accent-soft', hexA(accent, 0.14));
+        root.dataset.scene = inGame ? session.value?.templateId || 'home' : 'home';
+      },
+      { immediate: true }
+    );
+
+    watch(ending, (e) => {
+      if (!e) return;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      ambience.burst(w / 2, h * 0.46, 110);
+      setTimeout(() => ambience.burst(w * 0.32, h * 0.38, 45), 220);
+      setTimeout(() => ambience.burst(w * 0.68, h * 0.4, 45), 380);
+    });
+
+    /** 把「台词」和【强调】染上颜色，其余原样转义输出 */
+    function rich(text) {
+      const esc = String(text ?? '').replace(
+        /[&<>"']/g,
+        (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+      );
+      return esc
+        .replace(/「([^」\n]{1,140})」/g, '<em class="say">「$1」</em>')
+        .replace(/【([^】\n]{1,40})】/g, '<b class="mark">$1</b>');
     }
 
     const currentChoices = computed(() => {
@@ -273,6 +329,7 @@ const App = {
       push('金币', prev.gold, next.gold);
       pops.value = list;
       setTimeout(() => (pops.value = []), 2600);
+      if (next.hp < prev.hp) shake();
     }
 
     async function act(text) {
@@ -484,6 +541,13 @@ const App = {
       deleteId,
       hexA,
       timeAgo,
+      sceneOf,
+      thumbUrl,
+      curArt,
+      curScene,
+      curTemplate,
+      rich,
+      hit,
       start,
       open,
       beginRename,
@@ -521,17 +585,21 @@ const App = {
     </header>
 
     <section class="hero">
-      <div class="hero-kicker">一句话，就是下一段剧情</div>
-      <h1>你说什么，故事就往哪里<em>长</em></h1>
-      <p>
-        选一套剧本进入，写下一句行动——推门、问话、拔剑、撒谎。AI 负责把这句话写成 200 字剧情和新的选项；
-        生命、金币、体力与背包由系统按规则裁定，谁也加不满血。每一回合自动存档，关掉网页也能接着走。
-      </p>
-      <div class="hero-meta">
-        <div><strong>{{ templates.length }}</strong>套剧本</div>
-        <div><strong>{{ sessions.length }}</strong>个存档</div>
-        <div><strong>4</strong>项属性实时结算</div>
-        <div><strong>Markdown</strong>一键导出</div>
+      <div class="hero-art"></div>
+      <div class="hero-veil"></div>
+      <div class="hero-inner">
+        <div class="hero-kicker">一句话，就是下一段剧情</div>
+        <h1>你说什么，故事就往哪里<em>长</em></h1>
+        <p>
+          选一套剧本进入，写下一句行动——推门、问话、拔剑、撒谎。AI 负责把这句话写成 200 字剧情和新的选项；
+          生命、金币、体力与背包由系统按规则裁定，谁也加不满血。每一回合自动存档，关掉网页也能接着走。
+        </p>
+        <div class="hero-meta">
+          <div><strong>{{ templates.length }}</strong>套剧本</div>
+          <div><strong>{{ sessions.length }}</strong>个存档</div>
+          <div><strong>4</strong>项属性实时结算</div>
+          <div><strong>Markdown</strong>一键导出</div>
+        </div>
       </div>
     </section>
 
@@ -545,14 +613,22 @@ const App = {
         v-for="t in templates"
         :key="t.id"
         class="tpl"
-        :style="{ '--tpl-accent': t.accent, '--tpl-accent-soft': hexA(t.accent, 0.13) }"
+        :style="{
+          '--tpl-accent': t.accent,
+          '--tpl-accent-soft': hexA(t.accent, 0.13),
+          '--tpl-art': thumbUrl(t.id)
+        }"
         @click="start(t.id)"
       >
-        <div class="tpl-tag">{{ t.tag }}</div>
-        <h3>{{ t.title }}</h3>
-        <div class="sub">{{ t.subtitle }}</div>
-        <div class="world">{{ t.worldview }}</div>
-        <div class="go">进入 <i>→</i></div>
+        <div class="tpl-art"></div>
+        <div class="tpl-sheen"></div>
+        <div class="tpl-body">
+          <div class="tpl-tag">{{ t.tag }}</div>
+          <h3>{{ t.title }}</h3>
+          <div class="sub">{{ t.subtitle }}</div>
+          <div class="world">{{ t.worldview }}</div>
+          <div class="go">进入 <i>→</i></div>
+        </div>
       </div>
     </div>
 
@@ -620,41 +696,51 @@ const App = {
       </div>
     </header>
 
-    <div class="game-top">
-      <div class="game-title">
-        <div>
-          <h2>{{ session?.name }}</h2>
-          <div class="loc">{{ state?.location }} · {{ session?.status === 'ended' ? '已结局' : '自动存档中' }}</div>
-        </div>
-        <span class="turn-badge">TURN {{ state?.turn }}</span>
+    <div class="game-banner" :style="{ '--art': curArt }">
+      <div class="gb-art"></div>
+      <div class="gb-shade"></div>
+      <div class="gb-main">
+        <div class="gb-kicker">{{ curTemplate?.tag || '剧本' }} · {{ curTemplate?.subtitle || '' }}</div>
+        <h2>{{ session?.name }}</h2>
+        <div class="loc"><i class="pin"></i>{{ state?.location }} · {{ session?.status === 'ended' ? '已结局' : '自动存档中' }}</div>
       </div>
-      <div class="save-actions">
-        <button class="btn sm" @click="exportMd">导出 Markdown</button>
-        <button class="btn sm" :disabled="busy || session?.status === 'ended'" @click="endGame">结束本局</button>
+      <div class="gb-side">
+        <span class="turn-badge">TURN {{ String(state?.turn ?? 0).padStart(2, '0') }}</span>
+        <div class="save-actions">
+          <button class="btn sm" @click="exportMd">导出 Markdown</button>
+          <button class="btn sm" :disabled="busy || session?.status === 'ended'" @click="endGame">结束本局</button>
+        </div>
       </div>
     </div>
 
     <div class="game-grid">
       <div class="play-col">
-        <div class="narrative" ref="scroller" @scroll="onScroll">
-          <div v-for="t in turns" :key="t.turnNo" class="turn">
-            <div class="turn-head">
-              <span class="no">T{{ String(t.turnNo).padStart(2, '0') }}</span>
-              <span class="scene">{{ t.scene || t.state?.location }}</span>
+        <div class="narr-shell">
+          <div class="narrative" ref="scroller" @scroll="onScroll">
+            <div v-for="t in turns" :key="t.turnNo" class="turn">
+              <div class="turn-head">
+                <span class="no">T{{ String(t.turnNo).padStart(2, '0') }}</span>
+                <span class="scene">{{ t.scene || t.state?.location }}</span>
+                <span class="rule"></span>
+              </div>
+              <div v-if="t.turnNo > 0" class="turn-input"><b>你</b>{{ t.input }}</div>
+              <div class="prose" v-html="rich(t.narration)"></div>
+              <div v-if="t.degraded" class="degraded-note">本回合走了兜底文案（模型输出不合规）</div>
             </div>
-            <div v-if="t.turnNo > 0" class="turn-input"><b>你</b>{{ t.input }}</div>
-            <div class="prose">{{ t.narration }}</div>
-            <div v-if="t.degraded" class="degraded-note">本回合走了兜底文案（模型输出不合规）</div>
-          </div>
 
-          <div v-if="stream" class="turn streaming">
-            <div class="turn-head">
-              <span class="no">T{{ String(stream.turnNo).padStart(2, '0') }}</span>
-              <span class="scene">{{ stream.scene || '……' }}</span>
+            <div v-if="stream" class="turn streaming">
+              <div class="turn-head">
+                <span class="no">T{{ String(stream.turnNo).padStart(2, '0') }}</span>
+                <span class="scene">{{ stream.scene || '……' }}</span>
+                <span class="rule"></span>
+              </div>
+              <div class="turn-input"><b>你</b>{{ stream.input }}</div>
+              <div class="prose" v-html="rich(stream.narration)"></div>
             </div>
-            <div class="turn-input"><b>你</b>{{ stream.input }}</div>
-            <div class="prose">{{ stream.narration }}</div>
           </div>
+          <div class="narr-veil top"></div>
+          <div class="narr-veil bottom"></div>
+          <div class="think-bar" :class="{ on: busy }"></div>
         </div>
 
         <div v-if="currentChoices.length && !busy" class="choices">
@@ -723,7 +809,9 @@ const App = {
 
   <!-- ============================ 结局 ============================ -->
   <div v-if="ending && view === 'game'" class="ending-wrap">
-    <div class="ending-card">
+    <div class="ending-card" :style="{ '--art': curArt }">
+      <div class="ending-art"></div>
+      <div class="ending-glow"></div>
       <div class="ending-kicker">ENDING</div>
       <h2>{{ ending.title }}</h2>
       <div class="ending-text">{{ ending.text }}</div>
@@ -746,6 +834,7 @@ const App = {
     <span v-for="p in pops" :key="p.text" :class="p.up ? 'up' : 'down'">{{ p.text }}</span>
   </div>
 
+  <div class="hit-flash" :class="{ on: hit }"></div>
   <div v-if="toast" class="toast" :class="{ bad: toast.bad }">{{ toast.msg }}</div>
   `,
 };
